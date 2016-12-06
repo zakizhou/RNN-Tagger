@@ -97,6 +97,7 @@ context, tag, sequence_length = read_and_decode(filename_queue)
 
 class Inputs(object):
     def __init__(self):
+        self.max_steps = 50
         self.vocab_size = VOCAB_SIZE
         self.tags_size = TAGS_SIZE
         self.contexts, self.tags, self.sequence_lengths = input_producer(context, tag, sequence_length)
@@ -105,3 +106,5 @@ class Inputs(object):
 class Config(object):
     def __init__(self):
         self.embedding_size = 256
+        self.num_units = 54
+        self.learnaing_rate = 5e-4
