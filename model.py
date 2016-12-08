@@ -81,44 +81,27 @@ class BidRNNTagger(object):
                                                          inputs=look_up,
                                                          sequence_length=inputs.sequence_lengths,
                                                          dtype=tf.float32)
+            # outputs[0]: [batch_size, max_steps, forward_units]
+            # outputs[1]: [batch_size, max_steps, backward_units]
+            # output: [batch_size, max_steps, forward_units + backward_units]
+            output = tf.concat([2], outputs)
         with tf.variable_scope("output"):
-            forward_softmax_w = tf.get_variable(name="forward_softmax_w",
-                                                shape=[forward_units, tags_size],
-                                                initializer=tf.truncated_normal_initializer(stddev=0.05),
-                                                dtype=tf.float32)
-            forward_softmax_b = tf.get_variable(name="forward_softmax_b",
-                                                shape=[tags_size],
-                                                initializer=tf.constant_initializer(value=0.),
-                                                dtype=tf.float32)
-            backward_softmax_w = tf.get_variable(name="backward_softmax_w",
-                                                 shape=[backward_units, tags_size],
-                                                 initializer=tf.truncated_normal_initializer(stddev=0.05),
-                                                 dtype=tf.float32)
-            backward_softmax_b = tf.get_variable(name="backward_softmax_b",
-                                                 shape=[tags_size],
-                                                 initializer=tf.constant_initializer(value=0.),
-                                                 dtype=tf.float32)
-            forward_logits_flatten = tf.reshape(outputs[0], [-1, forward_units])
-            forward_logits = tf.nn.xw_plus_b(forward_logits_flatten, forward_softmax_w, forward_softmax_b)
-            backward_logits_flatten = tf.reshape(outputs[1], [-1, backward_units])
-            backward_logits = tf.nn.xw_plus_b(backward_logits_flatten, backward_softmax_w, backward_softmax_b)
-            # logits: [batch_size x max_steps, num_classes]
-            logits = tf.add(forward_logits, backward_logits)
+            softmax_w = tf.get_variable(name="softmax_w",
+                                        shape=[forward_units + backward_units, tags_size],
+                                        initializer=tf.truncated_normal_initializer(stddev=0.05),
+                                        dtype=tf.float32)
+            softmax_b = tf.get_variable(name="softmax_b",
+                                        shape=[tags_size],
+                                        initializer=tf.constant_initializer(value=0.),
+                                        dtype=tf.float32)
+            logits = tf.add(tf.matmul(output, softmax_w), softmax_b)
         with tf.name_scope("loss"):
-            # tags_flatten: [batch_size x max_steps]
-            tags_flatten = tf.reshape(inputs.tags, [-1])
-            # fake_loss: [batch_size x max_steps]
-            fake_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits, tags_flatten)
-            # mask: [batch_size x max_steps]
-            mask = tf.sign(tf.to_float(tags_flatten))
-            # loss_vec: [batch_size x max_steps]
-            loss_vec = tf.mul(fake_loss, mask)
-            # loss_per_example_per_step: [batch_size, max_steps]
-            loss_per_example_per_step = tf.reshape(loss_vec, tf.shape(inputs.tags))
-            # reduce all loss for each valid step for each example in minibatch
-            # loss_per_exmaple: [batch_size]
-            loss_per_example = tf.reduce_sum(loss_per_example_per_step, reduction_indices=[1]) / inputs.sequence_lengths
-            self.__loss = tf.reduce_mean(loss_per_example)
+            fake_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=inputs.tags)
+            mask = tf.sequence_mask(inputs.sequence_lengths, dtype=tf.float32)
+            loss_per_example_per_step = tf.mul(fake_loss, mask)
+            loss_per_example_sum = tf.reduce_sum(loss_per_example_per_step, reduction_indices=[2])
+            loss_per_example_average = tf.div(loss_per_example_sum, inputs.sequence_lengths)
+            self.__loss = tf.reduce_mean(loss_per_example_average)
         with tf.name_scope("train"):
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
             self.__train_op = optimizer.minimize(self.__loss)
