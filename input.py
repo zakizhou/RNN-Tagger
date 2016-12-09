@@ -3,71 +3,20 @@ from __future__ import absolute_import
 from __future__ import division
 
 
-import nltk
-import collections
-import itertools
 import tensorflow as tf
-import numpy as np
-import sys
 from tensorflow.contrib import training
 
 
-VOCAB_SIZE = 50000
-TAGS_SIZE = 350
-BATCH_SIZE = 3
-CAPACITY = 100
+# train
+# VOCAB_SIZE = 50000
+# TAGS_SIZE = 350
+# BATCH_SIZE = 96
 
 
-# def build_corpus(corpus):
-#     tuples = list(itertools.chain.from_iterable(corpus))
-#     words = [tuple[0].lower() for tuple in tuples]
-#     poses = [tuple[1] for tuple in tuples]
-#     word_counter = collections.Counter(words)
-#     vocab = [tuple[0] for tuple in word_counter.most_common(n=VOCAB_SIZE)]
-#     pos_counter = collections.Counter(poses)
-#     tags = [tuple[0] for tuple in pos_counter.most_common(n=TAGS_SIZE)]
-#     word2id = dict(zip(vocab, range(1, len(vocab)+1)))
-#     word2id['PAD'] = 0
-#     tag2id = dict(zip(tags, range(1, len(tags)+1)))
-#     tag2id['PAD'] = 0
-#     inputs = []
-#     labels = []
-#     for record in corpus:
-#         words_input, tags_label = zip(*record)
-#         words_id = [word2id[word.lower()] for word in words_input]
-#         tags_id = [tag2id[tag] for tag in tags_label]
-#         inputs.append(words_id)
-#         labels.append(tags_id)
-#     return word2id, tag2id, inputs, labels
-#
-#
-# def arr2str(array):
-#     return np.array(array).astype(np.int64).tostring()
-#
-#
-# def convert_to_records(inputs, labels):
-#     num_inputs = len(inputs)
-#     writer = tf.python_io.TFRecordWriter("records/examples.tfrecords")
-#     for index, (context, tags) in enumerate(zip(inputs, labels)):
-#         sys.stdout.write("\r")
-#         sys.stdout.write("write %6dth %% %d file into tfrecords file" % (index + 1, num_inputs))
-#         sys.stdout.flush()
-#         if len(context) != len(tags):
-#             raise ValueError("context length must be equal to that of tags")
-#         sequence_length = len(context)
-#         example = tf.train.Example(features=tf.train.Features(feature={
-#             "context": tf.train.Feature(bytes_list=tf.train.BytesList(value=[arr2str(context)])),
-#             "tag": tf.train.Feature(bytes_list=tf.train.BytesList(value=[arr2str(tags)])),
-#             "sequence_length": tf.train.Feature(int64_list=tf.train.Int64List(value=[sequence_length]))
-#         }))
-#         writer.write(example.SerializeToString())
-#     writer.close()
-#     print("\nwritten finished")
-#
-#
-# corpus = nltk.corpus.brown.tagged_sents()[:1000]
-# _, _, inputs, labels = build_corpus(corpus)
-# convert_to_records(inputs, labels)
+# test: first 1000 samples contain 4273 words and 148 tags
+VOCAB_SIZE = 4273  # 45000
+TAGS_SIZE = 148  # 148
+BUCKET_BOUNDARIES = [11, 21, 31, 41, 51]
 
 
 def read_and_decode(filename_queue):
@@ -85,33 +34,49 @@ def read_and_decode(filename_queue):
     return context, tag, sequence_length
 
 
-def input_producer(context, tag, sequence_length):
+def input_producer(context, tag, sequence_length, batch_size, capacity):
     sequence_lengths, (contexts, tags) = training.bucket_by_sequence_length(input_length=sequence_length,
                                                                             tensors=[context, tag],
-                                                                            batch_size=50,
-                                                                            bucket_boundaries=[10, 20, 30, 40, 50],
-                                                                            dynamic_pad=True)
+                                                                            batch_size=batch_size,
+                                                                            bucket_boundaries=BUCKET_BOUNDARIES,
+                                                                            dynamic_pad=True,
+                                                                            capacity=capacity)
     return contexts, tags, sequence_lengths
 
-filename_queue = tf.train.string_input_producer(["records/examples.tfrecords"])
-contexts, tags, sequence_lengths = read_and_decode(filename_queue)
+
+class Inputs(object):
+    def __init__(self, train=True):
+        if train is True:
+            filename_queue = tf.train.string_input_producer(["records/train.tfrecords"])
+            context, tag, sequence_length = read_and_decode(filename_queue)
+            self.contexts, self.tags, self.sequence_lengths = input_producer(context,
+                                                                             tag,
+                                                                             sequence_length,
+                                                                             batch_size=96,
+                                                                             capacity=4000)
+        else:
+            filename_queue = tf.train.string_input_producer(["records/valid.tfrecords"])
+            context, tag, sequence_length = read_and_decode(filename_queue)
+            self.contexts, self.tags, self.sequence_lengths = input_producer(context,
+                                                                             tag,
+                                                                             sequence_length,
+                                                                             batch_size=96,
+                                                                             capacity=4000)
+        self.vocab_size = VOCAB_SIZE
+        self.tags_size = TAGS_SIZE
 
 
-# sess = tf.Session()
-# tf.train.start_queue_runners(sess=sess)
-# s, c, t = sess.run([sequence_lengths, contexts, tags])
-
-
-# class Inputs(object):
-#     def __init__(self):
-#         self.max_steps = 50
-#         self.vocab_size = VOCAB_SIZE
-#         self.tags_size = TAGS_SIZE
-#         self.contexts, self.tags, self.sequence_lengths = input_producer(context, tag, sequence_length)
-#
-#
-# class Config(object):
-#     def __init__(self):
-#         self.embedding_size = 256
-#         self.num_units = 54
-#         self.learnaing_rate = 5e-4
+class Config(object):
+    def __init__(self, train=True):
+        if train is True:
+            self.embedding_size = 128
+            self.num_units = 32
+            self.learnaing_rate = 5e-4
+            self.forward_units = 24
+            self.backward_units = 32
+        else:
+            self.embedding_size = 24
+            self.num_units = 16
+            self.learnaing_rate = 5e-2
+            self.forward_units = 2
+            self.backward_units = 3
