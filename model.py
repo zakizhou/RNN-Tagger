@@ -84,7 +84,9 @@ class BidRNNTagger(object):
             # outputs[0]: [batch_size, max_steps, forward_units]
             # outputs[1]: [batch_size, max_steps, backward_units]
             # output: [batch_size, max_steps, forward_units + backward_units]
-            output = tf.concat([2], outputs)
+            output = tf.concat(2, outputs)
+            batch_size = output.get_shape().as_list()[0]
+            reshape = tf.reshape(output, [-1, forward_units + backward_units])
         with tf.variable_scope("output"):
             softmax_w = tf.get_variable(name="softmax_w",
                                         shape=[forward_units + backward_units, tags_size],
@@ -94,17 +96,26 @@ class BidRNNTagger(object):
                                         shape=[tags_size],
                                         initializer=tf.constant_initializer(value=0.),
                                         dtype=tf.float32)
-            logits = tf.add(tf.matmul(output, softmax_w), softmax_b)
+            xw_plus_b = tf.nn.xw_plus_b(reshape, softmax_w, softmax_b)
+            logits = tf.reshape(xw_plus_b, [batch_size, -1, tags_size])
         with tf.name_scope("loss"):
             fake_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=inputs.tags)
-            mask = tf.sequence_mask(inputs.sequence_lengths, dtype=tf.float32)
+            mask = tf.cast(tf.sign(inputs.tags), dtype=tf.float32)
             loss_per_example_per_step = tf.mul(fake_loss, mask)
-            loss_per_example_sum = tf.reduce_sum(loss_per_example_per_step, reduction_indices=[2])
-            loss_per_example_average = tf.div(loss_per_example_sum, inputs.sequence_lengths)
-            self.__loss = tf.reduce_mean(loss_per_example_average)
+            loss_per_example_sum = tf.reduce_sum(loss_per_example_per_step, reduction_indices=[1])
+            loss_per_example_average = tf.div(x=loss_per_example_sum,
+                                              y=tf.cast(inputs.sequence_lengths, tf.float32))
+            self.__loss = tf.reduce_mean(loss_per_example_average, name="loss")
         with tf.name_scope("train"):
             optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate)
-            self.__train_op = optimizer.minimize(self.__loss)
+            self.__train_op = optimizer.minimize(self.__loss, name="train_op")
+        with tf.name_scope("valid"):
+            predict = tf.argmax(logits, dimension=2)
+            fake_accuracy = tf.cast(tf.equal(predict, inputs.tags), dtype=tf.float32)
+            accuracy_matrix = tf.mul(fake_accuracy, mask)
+            accuracy_per_example = tf.div(x=tf.reduce_sum(accuracy_matrix, 1),
+                                          y=tf.cast(inputs.sequence_lengths, tf.float32))
+            self.__valid_accuracy = tf.reduce_mean(accuracy_per_example, name="valid_accuracy")
 
     @property
     def loss(self):
@@ -113,3 +124,7 @@ class BidRNNTagger(object):
     @property
     def train_op(self):
         return self.__train_op
+
+    @property
+    def validate(self):
+        return self.__valid_accuracy
