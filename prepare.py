@@ -27,7 +27,7 @@ def build_corpus(corpus):
     word2id['<unk>'] = VOCAB_SIZE - 1
     tag2id = dict(zip(tags, range(1, len(tags)+1)))
     tag2id['PAD'] = 0
-    tag2id['PAD'] = TAGS_SIZE - 1
+    tag2id['<unk>'] = TAGS_SIZE - 1
     inputs = []
     labels = []
     for i, record in enumerate(corpus):
